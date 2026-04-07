@@ -69,6 +69,7 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pip install "sqlalchemy @ git+https://github.com/sqlalchemy/sqlalchemy.git@main"
       - run: python tests/integration.py
+      - run: python tests/dialect_patch_bench.py
 
   benchmark:
     name: Benchmark
