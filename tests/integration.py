@@ -6,6 +6,7 @@ Tests:
   2. executemany        — SA with use_insertmanyvalues=False
   3. bulkcopy (direct)  — bulkcopy() function
   4. bulkcopy (hook)    — register_bulkcopy + on_complete callback
+  5. bulkcopy (pandas)  — df.to_sql(method=bulkcopy_insert_method)
 
 Uses deterministic seeded data so results are reproducible.
 Verifies correctness (row counts) and logs timing comparison.
@@ -16,9 +17,19 @@ from __future__ import annotations
 import sys
 import time
 
+import pandas as pd
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
 
-URL = "mssql+mssqlpython://sa:BenchMark!Pass123@localhost/master?Encrypt=yes&TrustServerCertificate=yes"
+from sqlalchemy_mssql_bulkcopy import (
+    bulkcopy,
+    bulkcopy_insert_method,
+    register_bulkcopy,
+)
+
+URL = (
+    "mssql+mssqlpython://sa:BenchMark!Pass123@localhost/master"
+    "?Encrypt=yes&TrustServerCertificate=yes"
+)
 TABLE = "__bcp_integration"
 N = 5_000
 
@@ -44,8 +55,6 @@ def truncate(engine):
 
 
 def main():
-    from sqlalchemy_mssql_bulkcopy import bulkcopy, register_bulkcopy
-
     metadata = MetaData()
     t = Table(
         TABLE,
@@ -150,17 +159,19 @@ def main():
     # ---------------------------------------------------------------
     # 5. bulkcopy (pandas df.to_sql)
     # ---------------------------------------------------------------
-    import pandas as pd
-
-    from sqlalchemy_mssql_bulkcopy import bulkcopy_insert_method
-
     engine_pd = create_engine(URL, use_insertmanyvalues=False)
     register_bulkcopy(engine_pd, batch_size=2_500, table_lock=True)
 
     truncate(engine)
     df = pd.DataFrame(generate_rows(N))
     t0 = time.perf_counter()
-    df.to_sql(TABLE, engine_pd, if_exists="append", index=False, method=bulkcopy_insert_method)
+    df.to_sql(
+        TABLE,
+        engine_pd,
+        if_exists="append",
+        index=False,
+        method=bulkcopy_insert_method,
+    )
     elapsed = time.perf_counter() - t0
     got = count_rows(engine)
     if got != N:
@@ -187,8 +198,7 @@ def main():
         print(f"  elapsed_time: {res.get('elapsed_time', 0):.3f}s")
 
     # Cleanup
-    with engine.begin() as conn:
-        t.drop(engine)
+    t.drop(engine)
     engine.dispose()
 
     # Verdict
