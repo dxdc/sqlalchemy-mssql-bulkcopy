@@ -28,7 +28,7 @@ Once SA 2.1 is stable:
 pip install sqlalchemy-mssql-bulkcopy
 ```
 
-Requires Python ≥ 3.10, SQLAlchemy ≥ 2.1, mssql-python ≥ 1.4.
+Requires Python ≥ 3.10, SQLAlchemy ≥ 2.1 (beta), mssql-python ≥ 1.4.
 
 ## Usage
 
@@ -127,6 +127,27 @@ register_bulkcopy(engine, on_complete=lambda t, r: results.append(r))
 
 Both approaches log at INFO level:
 `bulkcopy: 1000 rows -> dbo.users (0.050s)`
+
+## Performance
+
+CI benchmark — SQL Server 2022, 2-column table (GitHub Actions runner):
+
+| Method                          | 10K rows   | 100K rows  | 500K rows  |
+| ------------------------------- | ---------- | ---------- | ---------- |
+| `insertmanyvalues` (SA default) | 8.6K       | 8.9K       | 9.0K       |
+| `executemany`                   | 53.1K      | 49.6K      | 48.9K      |
+| pyodbc `fast_executemany`       | 81.9K      | 82.8K      | 77.6K      |
+| pyodbc `insertmanyvalues`       | 132.0K     | 137.8K     | 127.7K     |
+| `bulkcopy` (pandas)             | 75.6K      | 144.5K     | 151.4K     |
+| `bulkcopy` (hook)               | 102.0K     | 171.1K     | 166.8K     |
+| **`bulkcopy` (direct)**         | **119.5K** | **312.3K** | **391.9K** |
+
+At 500K rows, `bulkcopy` (direct) is **44x** faster than the SA default
+and **5x** faster than pyodbc's `fast_executemany`.
+
+Full benchmark results (JSON + interactive HTML report) are generated
+on every CI run and available as
+[workflow artifacts](https://github.com/dxdc/sqlalchemy-mssql-bulkcopy/actions).
 
 ## License
 
