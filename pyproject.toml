@@ -34,7 +34,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "pandas>=2.0",
-    "mssql-python>=1.4.0",
+    "mssql-python>=1.6.0",
     "pyodbc>=5.0",
     "ruff>=0.9",
 ]
