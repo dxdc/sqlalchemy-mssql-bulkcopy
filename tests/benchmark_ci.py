@@ -452,6 +452,7 @@ const D=__SUMMARY_JSON__;
 // Colors by category
 const P={
   'insertmanyvalues':'#78716c',
+  'insertmanyvalues (qmark)':'#d6d3d1',
   'insertmanyvalues + sis':'#a8a29e',
   'executemany':'#57534e',
   'bulkcopy (direct)':'#a78bfa',
@@ -465,7 +466,7 @@ const P={
 
 // Method ordering
 const MO=[
-  'insertmanyvalues','insertmanyvalues + sis','executemany',
+  'insertmanyvalues','insertmanyvalues (qmark)','insertmanyvalues + sis','executemany',
   'bulkcopy (direct)','bulkcopy (hook)','bulkcopy (pandas)',
   'cursor.executemany (raw)','cursor.bulkcopy (raw)',
   'pyodbc insertmanyvalues','pyodbc fast_executemany'
