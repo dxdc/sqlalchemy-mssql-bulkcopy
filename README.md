@@ -97,12 +97,28 @@ stmt = users.insert().execution_options(
 
 ### Pandas
 
+`bulkcopy(conn, df, "dbo.users")` takes a DataFrame directly, with no
+engine setup. To keep using `to_sql()`, register the hook (same engine
+requirements as above) and pass the insert method:
+
 ```python
-from sqlalchemy_mssql_bulkcopy import bulkcopy_insert_method
+from sqlalchemy_mssql_bulkcopy import bulkcopy_insert_method, register_bulkcopy
+
+engine = create_engine("mssql+mssqlpython://...", use_insertmanyvalues=False)
+register_bulkcopy(engine)
 
 df.to_sql("users", engine, method=bulkcopy_insert_method,
           if_exists="append", index=False)
 ```
+
+Missing values (`NaN`, `NaT`, `pd.NA`, `None`) load as `NULL` either way.
+
+### NULLs and column defaults
+
+SQL Server's bulk copy differs from `INSERT` in one way: by default a
+`NULL` sent to a column that has a `DEFAULT` is replaced by the default.
+Pass `keep_nulls=True` (to `bulkcopy()` or `register_bulkcopy()`) to
+store `NULL` exactly as an `INSERT` would.
 
 ## Confirming bulkcopy was used
 

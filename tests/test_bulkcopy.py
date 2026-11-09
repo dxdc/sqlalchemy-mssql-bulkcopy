@@ -142,6 +142,54 @@ class TestBulkcopy:
         assert kw["column_mappings"] == ["id", "name"]
         assert mock_bcp.call_args[0][1] == [(1, "Alice"), (2, "Bob")]
 
+    def test_dataframe_missing_values_and_numpy_scalars(self):
+        """NaN/NaT/pd.NA become None and numpy/pandas scalars become
+        builtins: the driver rejects anything else (e.g. NAType)."""
+        import datetime
+        import decimal
+
+        pd = pytest.importorskip("pandas")
+        np = pytest.importorskip("numpy")
+        engine, mock_bcp = _make_engine()
+        _make_table(engine)
+
+        df = pd.DataFrame(
+            {
+                "i": np.array([1, 2], dtype="int64"),
+                "f": [1.5, np.nan],
+                "ni": pd.array([7, pd.NA], dtype="Int64"),
+                "s": pd.array(["x", pd.NA], dtype="string"),
+                "o": ["a", None],
+                "ts": pd.to_datetime(["2026-01-02 03:04:05", None]),
+                "b": pd.array([True, pd.NA], dtype="boolean"),
+                "d": [decimal.Decimal("1.25"), None],
+            }
+        )
+        with engine.begin() as conn:
+            bulkcopy(conn, df, "users")
+
+        rows = mock_bcp.call_args[0][1]
+        assert rows == [
+            (1, 1.5, 7, "x", "a", datetime.datetime(2026, 1, 2, 3, 4, 5), True,
+             decimal.Decimal("1.25")),
+            (2, None, None, None, None, None, None, None),
+        ]  # fmt: skip
+        # Exact builtin types, not numpy/pandas subclasses or scalars
+        assert [type(v) for v in rows[0]] == [
+            int, float, int, str, str, datetime.datetime, bool, decimal.Decimal,
+        ]  # fmt: skip
+
+    def test_empty_dataframe(self):
+        pd = pytest.importorskip("pandas")
+        engine, mock_bcp = _make_engine()
+        _make_table(engine)
+
+        with engine.begin() as conn:
+            result = bulkcopy(conn, pd.DataFrame({"id": [], "name": []}), "users")
+
+        assert result["rows_copied"] == 0
+        mock_bcp.assert_not_called()
+
     def test_dataframe_columns_override(self):
         pd = pytest.importorskip("pandas")
         engine, mock_bcp = _make_engine()

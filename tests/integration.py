@@ -7,6 +7,8 @@ Tests:
   3. bulkcopy (direct)  — bulkcopy() function
   4. bulkcopy (hook)    — register_bulkcopy + on_complete callback
   5. bulkcopy (pandas)  — df.to_sql(method=bulkcopy_insert_method)
+  6. missing values      — DataFrame NaN/NaT/pd.NA round-trip as NULL
+                           via bulkcopy() and the to_sql hook
 
 Uses deterministic seeded data so results are reproducible.
 Verifies correctness (row counts) and logs timing comparison.
@@ -14,9 +16,11 @@ Verifies correctness (row counts) and logs timing comparison.
 
 from __future__ import annotations
 
+import datetime
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
 
@@ -52,6 +56,60 @@ def truncate(engine):
     with engine.connect() as conn:
         conn.execute(text(f"TRUNCATE TABLE {TABLE}"))
         conn.commit()
+
+
+NULLS_TABLE = "__bcp_integration_nulls"
+NULLS_DDL = f"""
+CREATE TABLE dbo.{NULLS_TABLE} (
+    id INT NOT NULL PRIMARY KEY,
+    f  FLOAT NULL,
+    ni BIGINT NULL,
+    s  NVARCHAR(20) NULL,
+    ts DATETIME2 NULL,
+    b  BIT NULL
+)
+"""
+NULLS_EXPECTED = [
+    (1, 1.5, 7, "x", datetime.datetime(2026, 1, 2, 3, 4, 5), True),
+    (2, None, None, None, None, None),
+    (3, None, 9, None, datetime.datetime(2026, 3, 4), False),
+]
+
+
+def nulls_frame() -> pd.DataFrame:
+    """One full row, one all-missing row, one mixed: every pandas flavour
+    of missing (float NaN, pd.NA in nullable dtypes, NaT, None)."""
+    return pd.DataFrame(
+        {
+            "id": [1, 2, 3],
+            "f": [1.5, np.nan, None],
+            "ni": pd.array([7, pd.NA, 9], dtype="Int64"),
+            "s": ["x", None, np.nan],
+            "ts": pd.to_datetime(["2026-01-02 03:04:05", None, "2026-03-04 00:00:00"]),
+            "b": pd.array([True, pd.NA, False], dtype="boolean"),
+        }
+    )
+
+
+def check_nulls(engine, label: str, load, errors: list[str]) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"IF OBJECT_ID('dbo.{NULLS_TABLE}') IS NOT NULL DROP TABLE dbo.{NULLS_TABLE}")
+        )
+        conn.execute(text(NULLS_DDL))
+    try:
+        load()
+    except Exception as exc:
+        errors.append(f"{label}: {type(exc).__name__}: {exc}")
+        return
+    with engine.connect() as conn:
+        got = [
+            tuple(r) for r in conn.execute(text(f"SELECT * FROM dbo.{NULLS_TABLE} ORDER BY id"))
+        ]
+    if got != NULLS_EXPECTED:
+        errors.append(f"{label}: got {got!r}, expected {NULLS_EXPECTED!r}")
+    else:
+        print(f"{label}: missing values round-trip as NULL")
 
 
 def main():
@@ -180,6 +238,38 @@ def main():
     engine_pd.dispose()
 
     # ---------------------------------------------------------------
+    # 6. DataFrame missing values (NaN / NaT / pd.NA) -> NULL
+    # ---------------------------------------------------------------
+    nulls_df = nulls_frame()
+
+    def load_direct():
+        with engine.begin() as conn:
+            bulkcopy(conn, nulls_df, f"dbo.{NULLS_TABLE}")
+
+    check_nulls(engine, "bulkcopy (direct, DataFrame)", load_direct, errors)
+
+    engine_nulls = create_engine(URL, use_insertmanyvalues=False)
+    nulls_fired: list[dict] = []
+    register_bulkcopy(engine_nulls, on_complete=lambda tbl, res: nulls_fired.append(res))
+
+    def load_hook():
+        nulls_df.to_sql(
+            NULLS_TABLE,
+            engine_nulls,
+            schema="dbo",
+            if_exists="append",
+            index=False,
+            method=bulkcopy_insert_method,
+        )
+        if not nulls_fired:
+            raise RuntimeError("bulkcopy did not run (fell back to executemany)")
+
+    check_nulls(engine, "bulkcopy (pandas hook, DataFrame)", load_hook, errors)
+    engine_nulls.dispose()
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP TABLE dbo.{NULLS_TABLE}"))
+
+    # ---------------------------------------------------------------
     # Report
     # ---------------------------------------------------------------
     print()
@@ -208,7 +298,7 @@ def main():
             print(f"  - {e}")
         sys.exit(1)
     else:
-        print(f"\nPASS: all 5 methods inserted {N} rows correctly")
+        print(f"\nPASS: all 5 methods inserted {N} rows correctly; missing values load as NULL")
         sys.exit(0)
 
 

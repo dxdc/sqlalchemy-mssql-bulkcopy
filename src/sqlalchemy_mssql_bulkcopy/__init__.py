@@ -286,7 +286,7 @@ def _normalize_data(
         if isinstance(data, pd.DataFrame):
             if columns is None:
                 columns = list(data.columns)
-            return list(data.itertuples(index=False, name=None)), columns
+            return _frame_to_rows(data), columns
     except ImportError:
         pass
 
@@ -300,3 +300,25 @@ def _normalize_data(
         return [tuple(row) for row in data], columns
 
     return data, columns
+
+
+def _frame_to_rows(df: Any) -> list[tuple[Any, ...]]:
+    """Convert a DataFrame to tuples of plain Python values.
+
+    The driver's bulk copy only accepts builtin types, so missing values
+    (``NaN``, ``NaT``, ``pd.NA``) become ``None`` and numpy/pandas scalars
+    become ``int``/``float``/``bool``/``datetime``, the same conversion
+    ``DataFrame.to_sql()`` applies before inserting.  Works column-wise.
+    """
+    import numpy as np
+    import pandas as pd
+
+    columns = []
+    for _, ser in df.items():
+        if ser.dtype.kind == "M" or isinstance(ser.dtype, pd.DatetimeTZDtype):
+            values = np.array(ser.dt.to_pydatetime(), dtype=object)
+        else:
+            values = np.array(ser.astype(object), dtype=object)
+        values[ser.isna().to_numpy()] = None
+        columns.append(values)
+    return list(zip(*columns, strict=True))
