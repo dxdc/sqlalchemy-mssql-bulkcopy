@@ -1,0 +1,61 @@
+name: TEMP mssql-python patch check
+
+on:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: BenchMark!Pass123
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'BenchMark!Pass123' -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: dxdc/mssql-python
+          ref: perf/pyformat-single-pass
+          path: mssqlpy
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Released 1.17.0 vs patched parameter_helper.py
+        env:
+          DB_CONNECTION_STRING: "SERVER=localhost;DATABASE=master;UID=sa;PWD=BenchMark!Pass123;Encrypt=yes;TrustServerCertificate=yes"
+        run: |
+          pip install -q "mssql-python==1.17.0" "sqlalchemy>=2.1" pytest
+          SP=$(cd / && python -I -c 'import mssql_python, os; print(os.path.dirname(mssql_python.__file__))')
+          echo "installed driver: $SP"
+          diff <(git -C mssqlpy show HEAD~1:mssql_python/parameter_helper.py) "$SP/parameter_helper.py" > /dev/null && echo "installed parameter_helper.py == upstream main"
+          git -C mssqlpy show HEAD~1:tests/test_015_pyformat_parameters.py > mssqlpy/tests/test_015_upstream_copy.py
+          python probe/sa_insert_speed.py released
+          cd mssqlpy
+          run_suite() {
+            pytest "$2" tests/test_023_execute_path_parity.py tests/test_004_cursor.py -q -p no:cacheprovider -rfE > "/tmp/$1.log" 2>&1 || true
+            tail -1 "/tmp/$1.log"
+            grep -E '^(FAILED|ERROR) ' "/tmp/$1.log" | sed -E 's/ - .*//; s/test_015_upstream_copy/test_015_pyformat_parameters/' | sort -u > "/tmp/$1.ids"
+          }
+          echo "== baseline (released 1.17.0)"; run_suite baseline tests/test_015_upstream_copy.py
+          cp mssql_python/parameter_helper.py "$SP/parameter_helper.py"
+          echo "== patched"; run_suite patched tests/test_015_pyformat_parameters.py
+          echo "== failing only WITH the patch:"; comm -13 /tmp/baseline.ids /tmp/patched.ids
+          echo "== failing only WITHOUT the patch:"; comm -23 /tmp/baseline.ids /tmp/patched.ids
+          echo "== failing in both (pre-existing):"; comm -12 /tmp/baseline.ids /tmp/patched.ids | head -40
+          cd ..
+          python probe/sa_insert_speed.py patched
