@@ -66,6 +66,7 @@ jobs:
           python-version: "3.12"
 
       - run: pip install -e ".[dev]"
+      - run: python tests/pandas_nulls_probe.py
       - run: python tests/integration.py
       - run: python tests/dialect_patch_bench.py
 
