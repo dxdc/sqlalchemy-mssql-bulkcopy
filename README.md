@@ -13,6 +13,35 @@ mssql-python adds new options, this package supports them automatically.
 
 Based on the [event hook approach recommended by SQLAlchemy's maintainer](https://github.com/sqlalchemy/sqlalchemy/issues/13218).
 
+> **Maintenance mode.** Most code no longer needs this package. It still
+> works and will get bug fixes, but no new features. Instead:
+>
+> - **Regular inserts** (transactional, any size): SQLAlchemy's native
+>   `mssql+mssqlpython` dialect with `paramstyle="qmark"`, about 8x
+>   faster than its default on mssql-python
+>   ([why](#performance)):
+>
+>   ```python
+>   engine = create_engine("mssql+mssqlpython://...", paramstyle="qmark")
+>   ```
+>
+> - **Bulk loads:** call the driver's bulk copy directly. Pass the three
+>   options below so it stores what an INSERT would, and read
+>   [How bulk copy differs from INSERT](#how-bulk-copy-differs-from-insert)
+>   first (it runs on its own connection, outside your transaction):
+>
+>   ```python
+>   with engine.connect() as conn:
+>       cursor = conn.connection.dbapi_connection.cursor()
+>       opts = dict(keep_nulls=True, check_constraints=True, fire_triggers=True, timeout=0)
+>
+>       # rows: tuples, in the order of column_mappings
+>       cursor.bulkcopy("dbo.users", rows, column_mappings=["id", "name"], **opts)
+>
+>       # DataFrames (needs pyarrow); missing values load as NULL
+>       cursor.bulkcopy_arrow("dbo.users", df, column_mappings=list(df.columns), **opts)
+>   ```
+
 ## Install
 
 ```bash
