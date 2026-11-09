@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sqlalchemy-mssql-bulkcopy"
 dynamic = ["version"]
-description = "Bulk copy for SQLAlchemy + mssql-python — 10-50x faster writes via SQL Server's native TDS protocol"
+description = "Bulk copy for SQLAlchemy + mssql-python via SQL Server's native TDS bulk load protocol"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

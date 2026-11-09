@@ -4,8 +4,9 @@
 [![PyPI](https://img.shields.io/pypi/v/sqlalchemy-mssql-bulkcopy)](https://pypi.org/project/sqlalchemy-mssql-bulkcopy/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Bulk copy for SQLAlchemy + mssql-python — 10–50× faster writes via
-SQL Server's native TDS bulk load protocol.
+Bulk copy for SQLAlchemy + mssql-python: load large datasets through
+SQL Server's native TDS bulk load protocol, 2-3x faster than
+SQLAlchemy's fastest INSERT path (see [Performance](#performance)).
 
 All `cursor.bulkcopy()` kwargs pass through to the driver. When
 mssql-python adds new options, this package supports them automatically.
@@ -91,9 +92,9 @@ stmt = users.insert().execution_options(
 > `use_insertmanyvalues` is not disabled. SA 2.x defaults to multi-row
 > `INSERT … VALUES` batching which bypasses `executemany()` entirely —
 > the event hook never fires without this flag. This is a global engine
-> setting: non-bulkcopy inserts will use `executemany()` instead, which
-> is slightly slower for medium-sized batches. If that matters, use
-> `bulkcopy()` directly instead.
+> setting: non-bulkcopy inserts will use `executemany()` instead, about
+> half the speed of the default INSERT path with `paramstyle="qmark"`.
+> If that matters, use `bulkcopy()` directly instead.
 
 ### Pandas
 
@@ -168,28 +169,46 @@ Both approaches log at INFO level:
 
 ## Performance
 
-CI benchmark — SQL Server 2022, 2-column table (GitHub Actions runner;
-SQLAlchemy 2.1.8, mssql-python 1.17.0), rows per second:
+CI benchmark — SQL Server 2022, 2-column table, GitHub Actions runner,
+SQLAlchemy 2.1.8 with its native `mssql+mssqlpython` dialect,
+mssql-python 1.17.0. Rows per second:
 
-| Method                          | 10K rows   | 100K rows  | 500K rows  |
-| ------------------------------- | ---------- | ---------- | ---------- |
-| `insertmanyvalues` (SA default) | 16.5K      | 17.3K      | 17.2K      |
-| `executemany`                   | 95.2K      | 81.5K      | 77.3K      |
-| pyodbc `fast_executemany`       | 120.4K     | 122.5K     | 118.6K     |
-| pyodbc `insertmanyvalues`       | 176.2K     | 171.6K     | 161.0K     |
-| `bulkcopy` (pandas)             | 141.9K     | 121.4K     | 179.9K     |
-| `bulkcopy` (hook)               | 232.2K     | 230.2K     | 223.7K     |
-| **`bulkcopy` (direct)**         | **316.7K** | **434.4K** | **481.6K** |
+| Method                                       | 10K rows   | 100K rows  | 500K rows  | In your transaction? |
+| -------------------------------------------- | ---------- | ---------- | ---------- | -------------------- |
+| SA `insertmanyvalues` (default)              | 19.2K      | 19.0K      | 20.9K      | yes                  |
+| SA `executemany`                             | 46.2K      | 68.5K      | 72.9K      | yes                  |
+| pyodbc `fast_executemany`                    | 123.7K     | 113.0K     | 110.9K     | yes                  |
+| pyodbc `insertmanyvalues`                    | 135.1K     | 133.0K     | 121.9K     | yes                  |
+| SA `insertmanyvalues`, `paramstyle="qmark"`  | 120.9K     | 139.0K     | 172.3K     | yes                  |
+| `bulkcopy` (hook)                            | 146.0K     | 135.1K     | 170.8K     | **no**               |
+| `bulkcopy` (pandas `to_sql`)                 | 199.0K     | 156.7K     | 171.3K     | **no**               |
+| **`bulkcopy` (direct)**                      | **339.3K** | **403.5K** | **411.8K** | **no**               |
 
-At 500K rows, `bulkcopy` (direct) is **28x** faster than the SA default
-and **4x** faster than pyodbc's `fast_executemany`.
+At 500K rows, `bulkcopy()` (direct) is **2.4x** faster than SQLAlchemy
+with `paramstyle="qmark"` and **20x** faster than SQLAlchemy's default.
+Numbers vary run to run by about ±20%.
 
-**Tip for regular inserts:** mssql-python declares the `pyformat`
+**Which to use:**
+
+- **Everyday inserts, or anything that must roll back with your
+  transaction:** plain SQLAlchemy with `paramstyle="qmark"` (below). At
+  100K+ rows it matches the event hook and `to_sql` path, and it stays
+  transactional. Plain `df.to_sql()` uses the same INSERT path.
+- **Large loads where a separate commit is fine** (staging tables,
+  ETL, reloads): `bulkcopy()` directly, 2-3x faster again. See
+  [How bulk copy differs from INSERT](#how-bulk-copy-differs-from-insert).
+- **The event hook and `to_sql` method** pay SQLAlchemy's per-row
+  processing before the bulk copy starts, so they end up close to the
+  `qmark` INSERT path while giving up transactional behavior. They
+  mostly help around 10K rows per call.
+
+**Why `paramstyle="qmark"`:** mssql-python declares the `pyformat`
 parameter style, so SQLAlchemy sends `%(name)s` placeholders that the
-driver rewrites to `?` in Python on every call. That rewrite is what
-holds the SA default near 17K rows/s. Asking SQLAlchemy for `qmark`
-skips it, about 8x faster in CI (138K vs 17K rows/s for 100K rows, on
-par with pyodbc), and works with everything in this package:
+driver rewrites to `?` in Python on every call. On a 1,000-row
+multi-row INSERT that rewrite takes about 50 ms, which is what holds
+SQLAlchemy's default near 20K rows/s. Asking SQLAlchemy for `qmark`
+skips it (the values are still sent as bound parameters), and it works
+with everything in this package:
 
 ```python
 engine = create_engine("mssql+mssqlpython://...", paramstyle="qmark")
