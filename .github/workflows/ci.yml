@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v6
@@ -32,7 +32,6 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - run: pip install -e ".[dev]"
-      - run: pip install "sqlalchemy @ git+https://github.com/sqlalchemy/sqlalchemy.git@main"
       - run: ruff check src/ tests/
       - run: ruff format --check src/ tests/
       - run: pytest --cov=sqlalchemy_mssql_bulkcopy --cov-report=term-missing
@@ -67,7 +66,6 @@ jobs:
           python-version: "3.12"
 
       - run: pip install -e ".[dev]"
-      - run: pip install "sqlalchemy @ git+https://github.com/sqlalchemy/sqlalchemy.git@main"
       - run: python tests/integration.py
       - run: python tests/dialect_patch_bench.py
 
@@ -104,7 +102,6 @@ jobs:
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
       - run: pip install -e ".[dev]"
-      - run: pip install "sqlalchemy @ git+https://github.com/sqlalchemy/sqlalchemy.git@main"
       - run: python tests/benchmark_ci.py
       - uses: actions/upload-artifact@v5
         if: always()

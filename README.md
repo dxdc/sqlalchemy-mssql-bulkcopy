@@ -14,21 +14,12 @@ Based on the [event hook approach recommended by SQLAlchemy's maintainer](https:
 
 ## Install
 
-The `mssql+mssqlpython` dialect requires SQLAlchemy ≥ 2.1.0b2,
-which is not yet on PyPI. Install SA from git until then:
-
-```bash
-pip install "sqlalchemy @ git+https://github.com/sqlalchemy/sqlalchemy.git@main"
-pip install sqlalchemy-mssql-bulkcopy
-```
-
-Once SA 2.1 is stable:
-
 ```bash
 pip install sqlalchemy-mssql-bulkcopy
 ```
 
-Requires Python ≥ 3.10, SQLAlchemy ≥ 2.1 (beta), mssql-python ≥ 1.4.
+Requires Python ≥ 3.11, SQLAlchemy ≥ 2.1 (the first release with the
+`mssql+mssqlpython` dialect), mssql-python ≥ 1.4.
 
 ## Usage
 
