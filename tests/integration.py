@@ -9,6 +9,8 @@ Tests:
   5. bulkcopy (pandas)  — df.to_sql(method=bulkcopy_insert_method)
   6. missing values      — DataFrame NaN/NaT/pd.NA round-trip as NULL
                            via bulkcopy() and the to_sql hook
+  7. INSERT-like defaults — NULL kept in a DEFAULT column, CHECK
+                           constraint enforced, trigger fired
 
 Uses deterministic seeded data so results are reproducible.
 Verifies correctness (row counts) and logs timing comparison.
@@ -270,6 +272,46 @@ def main():
         conn.execute(text(f"DROP TABLE dbo.{NULLS_TABLE}"))
 
     # ---------------------------------------------------------------
+    # 7. INSERT-like defaults (keep_nulls, check_constraints, fire_triggers)
+    # ---------------------------------------------------------------
+    with engine.begin() as conn:
+        for name in ("__bcp_defaults_audit", "__bcp_defaults"):
+            conn.execute(text(f"IF OBJECT_ID('dbo.{name}') IS NOT NULL DROP TABLE dbo.{name}"))
+        conn.execute(
+            text(
+                "CREATE TABLE dbo.__bcp_defaults (id INT PRIMARY KEY,"
+                " d INT NULL DEFAULT 42, qty INT NULL CHECK (qty > 0))"
+            )
+        )
+        conn.execute(text("CREATE TABLE dbo.__bcp_defaults_audit (id INT)"))
+        conn.execute(
+            text(
+                "CREATE TRIGGER dbo.__bcp_defaults_trg ON dbo.__bcp_defaults AFTER INSERT AS "
+                "INSERT INTO dbo.__bcp_defaults_audit SELECT id FROM inserted"
+            )
+        )
+    with engine.begin() as conn:
+        bulkcopy(conn, [(1, None, 5)], "dbo.__bcp_defaults", columns=["id", "d", "qty"])
+    with engine.connect() as conn:
+        stored = conn.execute(text("SELECT id, d, qty FROM dbo.__bcp_defaults")).fetchall()
+        audited = conn.execute(text("SELECT COUNT(*) FROM dbo.__bcp_defaults_audit")).scalar()
+    if [tuple(r) for r in stored] != [(1, None, 5)]:
+        errors.append(f"defaults: NULL not kept in DEFAULT column, got {stored!r}")
+    if audited != 1:
+        errors.append(f"defaults: trigger did not fire (audit rows: {audited})")
+    try:
+        with engine.begin() as conn:
+            bulkcopy(conn, [(2, None, -1)], "dbo.__bcp_defaults", columns=["id", "d", "qty"])
+        errors.append("defaults: row violating CHECK (qty > 0) was accepted")
+    except Exception:
+        pass
+    if not errors:
+        print("INSERT-like defaults: NULL kept, CHECK enforced, trigger fired")
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE dbo.__bcp_defaults"))
+        conn.execute(text("DROP TABLE dbo.__bcp_defaults_audit"))
+
+    # ---------------------------------------------------------------
     # Report
     # ---------------------------------------------------------------
     print()
@@ -298,7 +340,7 @@ def main():
             print(f"  - {e}")
         sys.exit(1)
     else:
-        print(f"\nPASS: all 5 methods inserted {N} rows correctly; missing values load as NULL")
+        print(f"\nPASS: all 5 methods inserted {N} rows correctly; NULL handling and defaults OK")
         sys.exit(0)
 
 

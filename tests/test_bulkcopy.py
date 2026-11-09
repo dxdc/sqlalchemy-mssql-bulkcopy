@@ -282,6 +282,28 @@ class TestBulkcopy:
 
         assert "bulkcopy: 2 rows -> users" in caplog.text
 
+    def test_insert_like_defaults(self):
+        """NULLs kept, constraints checked, triggers fired: what an INSERT does."""
+        engine, mock_bcp = _make_engine()
+        _make_table(engine)
+
+        with engine.begin() as conn:
+            bulkcopy(conn, [(1, None)], "users", columns=["id", "name"])
+
+        kw = mock_bcp.call_args[1]
+        assert kw["keep_nulls"] is True
+        assert kw["check_constraints"] is True
+        assert kw["fire_triggers"] is True
+
+    def test_keep_nulls_override(self):
+        engine, mock_bcp = _make_engine()
+        _make_table(engine)
+
+        with engine.begin() as conn:
+            bulkcopy(conn, [(1, None)], "users", columns=["id", "name"], keep_nulls=False)
+
+        assert mock_bcp.call_args[1]["keep_nulls"] is False
+
 
 # ---------------------------------------------------------------------------
 # register_bulkcopy() — event hook
@@ -307,6 +329,25 @@ class TestRegisterBulkcopy:
         assert "users" in mock_bcp.call_args[0][0]
         assert kw["column_mappings"] == ["id", "name"]
         assert kw["batch_size"] == 999
+        assert kw["keep_nulls"] is True
+        assert kw["check_constraints"] is True
+        assert kw["fire_triggers"] is True
+
+    def test_keep_nulls_override_engine_and_statement(self):
+        engine, mock_bcp = _make_engine(keep_nulls=False)
+        users = _make_table(engine)
+        rows = [{"id": 1, "name": None}, {"id": 2, "name": "B"}]
+
+        with engine.begin() as conn:
+            conn.execute(users.insert().execution_options(use_bulkcopy=True), rows)
+        assert mock_bcp.call_args[1]["keep_nulls"] is False
+
+        with engine.begin() as conn:
+            conn.execute(
+                users.insert().execution_options(use_bulkcopy=True, bulkcopy_keep_nulls=True),
+                rows,
+            )
+        assert mock_bcp.call_args[1]["keep_nulls"] is True
 
     def test_skipped_without_opt_in(self):
         engine, mock_bcp = _make_engine()

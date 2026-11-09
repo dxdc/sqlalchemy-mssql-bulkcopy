@@ -113,12 +113,43 @@ df.to_sql("users", engine, method=bulkcopy_insert_method,
 
 Missing values (`NaN`, `NaT`, `pd.NA`, `None`) load as `NULL` either way.
 
-### NULLs and column defaults
+## How bulk copy differs from INSERT
 
-SQL Server's bulk copy differs from `INSERT` in one way: by default a
-`NULL` sent to a column that has a `DEFAULT` is replaced by the default.
-Pass `keep_nulls=True` (to `bulkcopy()` or `register_bulkcopy()`) to
-store `NULL` exactly as an `INSERT` would.
+**Defaults match INSERT.** SQL Server's bulk copy normally replaces an
+explicit `NULL` with the column's `DEFAULT`, accepts rows that break
+CHECK and FOREIGN KEY constraints (and then marks those constraints
+untrusted), and skips INSERT triggers. This package passes
+`keep_nulls=True`, `check_constraints=True` and `fire_triggers=True` by
+default so a bulk load stores what an INSERT would. Pass `False` for any
+of them to trade that for speed (checking constraints cost about a
+quarter of the throughput on a table with a foreign key and a CHECK).
+
+**Not part of your transaction.** mssql-python runs each bulk copy on
+its own new connection, which commits on its own. So:
+
+- rolling back the surrounding SQLAlchemy transaction does **not**
+  remove bulk-copied rows (this applies to the event hook too);
+- if your transaction has uncommitted work on the target table
+  (`TRUNCATE`, `CREATE TABLE`, an INSERT with `table_lock=True`), the
+  bulk copy waits on those locks until it times out;
+- `#temp` tables aren't visible to it.
+
+Commit any setup first. For `to_sql()`, create the table beforehand and
+use `if_exists="append"`: when `to_sql()` creates or replaces the table
+itself, that happens inside its own transaction, so the hook times out
+(30 s by default) and falls back to a regular INSERT.
+
+**IDENTITY columns:** to load your own values into an IDENTITY column,
+pass `keep_identity=True`. Without it the driver refuses the column
+("Destination column ... not found").
+
+**Small batches:** each call opens a connection and reads the table's
+metadata, about 8 ms of fixed cost on a local server. Bulk copy
+overtakes `executemany()` at around 2,000 rows per call; below that,
+a regular INSERT is faster.
+
+**Timeout:** the driver's default `timeout` is 30 seconds for the whole
+load. Pass `timeout=0` (no limit) or a larger value for big loads.
 
 ## Confirming bulkcopy was used
 
@@ -152,6 +183,17 @@ SQLAlchemy 2.1.8, mssql-python 1.17.0), rows per second:
 
 At 500K rows, `bulkcopy` (direct) is **28x** faster than the SA default
 and **4x** faster than pyodbc's `fast_executemany`.
+
+**Tip for regular inserts:** mssql-python declares the `pyformat`
+parameter style, so SQLAlchemy sends `%(name)s` placeholders that the
+driver rewrites to `?` in Python on every call. That rewrite is what
+holds the SA default near 17K rows/s. Asking SQLAlchemy for `qmark`
+skips it, about 8x faster in CI (138K vs 17K rows/s for 100K rows, on
+par with pyodbc), and works with everything in this package:
+
+```python
+engine = create_engine("mssql+mssqlpython://...", paramstyle="qmark")
+```
 
 Full benchmark results (JSON + interactive HTML report) are generated
 on every CI run and available as
