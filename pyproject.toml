@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sqlalchemy-mssql-bulkcopy"
 dynamic = ["version"]
-description = "Bulk copy for SQLAlchemy + mssql-python — 10-50x faster writes via SQL Server's native TDS protocol"
+description = "Bulk copy for SQLAlchemy + mssql-python via SQL Server's native TDS bulk load protocol"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Daniel Caspi" }]
 keywords = [
     "sqlalchemy", "mssql", "sql-server", "bulk-copy", "pandas",
@@ -19,7 +19,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -27,7 +26,7 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["sqlalchemy>=2.1.0b1"]
+dependencies = ["sqlalchemy>=2.1.0"]
 
 [project.optional-dependencies]
 dev = [
@@ -48,7 +47,7 @@ Changelog = "https://github.com/dxdc/sqlalchemy-mssql-bulkcopy/releases"
 where = ["src"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 99
 src = ["src", "tests"]
 exclude = ["_version.py"]

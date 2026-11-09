@@ -42,6 +42,20 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# Driver options we default differently from mssql-python so a bulk load
+# stores exactly what an INSERT would.  Any of them can be overridden
+# (pass False) when raw speed matters more than INSERT parity.
+#   keep_nulls: otherwise SQL Server replaces an explicit NULL with the
+#     column's DEFAULT; an INSERT stores the NULL.
+#   check_constraints: otherwise rows violating CHECK / FOREIGN KEY
+#     constraints are accepted and those constraints are marked untrusted.
+#   fire_triggers: otherwise INSERT triggers on the table do not run.
+_INSERT_LIKE_DEFAULTS: dict[str, Any] = {
+    "keep_nulls": True,
+    "check_constraints": True,
+    "fire_triggers": True,
+}
+
 
 # ---------------------------------------------------------------------------
 # Primary API: direct bulkcopy
@@ -80,6 +94,9 @@ def bulkcopy(
         for the full list: ``batch_size``, ``table_lock``,
         ``keep_identity``, ``check_constraints``, ``fire_triggers``,
         ``keep_nulls``, ``timeout``, ``use_internal_transaction``.
+        ``keep_nulls``, ``check_constraints`` and ``fire_triggers``
+        default to ``True`` here (the driver defaults them to ``False``)
+        so the load stores what an INSERT would; pass ``False`` to opt out.
 
     Returns
     -------
@@ -99,6 +116,7 @@ def bulkcopy(
     if not rows:
         return {"rows_copied": 0, "batch_count": 0, "elapsed_time": 0.0}
 
+    kwargs = {**_INSERT_LIKE_DEFAULTS, **kwargs}
     if columns is not None:
         kwargs["column_mappings"] = columns
 
@@ -147,6 +165,9 @@ def register_bulkcopy(
         Default kwargs forwarded to ``cursor.bulkcopy()``.
         Overridable per-statement via
         ``execution_options(bulkcopy_<key>=value)``.
+        ``keep_nulls``, ``check_constraints`` and ``fire_triggers``
+        default to ``True`` so the load stores what the INSERT it
+        replaces would; pass ``False`` to opt out.
 
     Raises
     ------
@@ -206,7 +227,7 @@ def register_bulkcopy(
             rows = [tuple(row) for row in parameters]
 
         # Engine defaults ← per-statement overrides (bulkcopy_ prefix)
-        bcp_kwargs: dict[str, Any] = {**defaults}
+        bcp_kwargs: dict[str, Any] = {**_INSERT_LIKE_DEFAULTS, **defaults}
         bcp_kwargs["column_mappings"] = col_names
         for key, value in opts.items():
             if key.startswith("bulkcopy_"):
@@ -286,7 +307,7 @@ def _normalize_data(
         if isinstance(data, pd.DataFrame):
             if columns is None:
                 columns = list(data.columns)
-            return list(data.itertuples(index=False, name=None)), columns
+            return _frame_to_rows(data), columns
     except ImportError:
         pass
 
@@ -300,3 +321,25 @@ def _normalize_data(
         return [tuple(row) for row in data], columns
 
     return data, columns
+
+
+def _frame_to_rows(df: Any) -> list[tuple[Any, ...]]:
+    """Convert a DataFrame to tuples of plain Python values.
+
+    The driver's bulk copy only accepts builtin types, so missing values
+    (``NaN``, ``NaT``, ``pd.NA``) become ``None`` and numpy/pandas scalars
+    become ``int``/``float``/``bool``/``datetime``, the same conversion
+    ``DataFrame.to_sql()`` applies before inserting.  Works column-wise.
+    """
+    import numpy as np
+    import pandas as pd
+
+    columns = []
+    for _, ser in df.items():
+        if ser.dtype.kind == "M" or isinstance(ser.dtype, pd.DatetimeTZDtype):
+            values = np.array(ser.dt.to_pydatetime(), dtype=object)
+        else:
+            values = np.array(ser.astype(object), dtype=object)
+        values[ser.isna().to_numpy()] = None
+        columns.append(values)
+    return list(zip(*columns, strict=True))

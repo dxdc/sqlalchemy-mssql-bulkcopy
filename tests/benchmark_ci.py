@@ -6,6 +6,7 @@ Up to 10 methods when pyodbc + ODBC driver are available.
 
 mssql-python (SA layer):
   1. insertmanyvalues           — SA 2.x default
+  1b. insertmanyvalues (qmark)  — SA default with paramstyle="qmark"
   2. insertmanyvalues + sis     — SA default + use_setinputsizes=True
   3. executemany                 — SA with use_insertmanyvalues=False
 
@@ -58,6 +59,7 @@ ITERATIONS = 2
 # Method display order — controls chart legend and grouping
 METHOD_ORDER = [
     "insertmanyvalues",
+    "insertmanyvalues (qmark)",
     "executemany",
     "bulkcopy (direct)",
     "bulkcopy (hook)",
@@ -188,6 +190,9 @@ def main():
 
     # --- mssql-python engines ---
     engine = create_engine(URL)
+    # mssql-python declares the pyformat paramstyle; qmark skips the driver's
+    # per-call %(name)s -> ? rewrite of each multi-row INSERT
+    engine_qmark = create_engine(URL, paramstyle="qmark")
     engine_em = create_engine(URL, use_insertmanyvalues=False)
 
     engine_hook = create_engine(URL, use_insertmanyvalues=False)
@@ -217,7 +222,7 @@ def main():
     metadata.create_all(engine)
 
     all_results: list[dict] = []
-    method_count = 9 if has_pyodbc else 7
+    method_count = 10 if has_pyodbc else 8
 
     for n in ROW_COUNTS:
         print(f"\n--- {n:,d} rows ---")
@@ -228,6 +233,10 @@ def main():
         for i in range(ITERATIONS):
             methods = [
                 ("insertmanyvalues", lambda r=rows: _exec_insert(engine, t, r)),
+                (
+                    "insertmanyvalues (qmark)",
+                    lambda r=rows: _exec_insert(engine_qmark, t, r),
+                ),
                 ("executemany", lambda r=rows: _exec_insert(engine_em, t, r)),
                 (
                     "bulkcopy (direct)",
@@ -299,7 +308,7 @@ def main():
 
     # Cleanup
     t.drop(engine)
-    engines = [engine, engine_em, engine_hook, engine_pd]
+    engines = [engine, engine_qmark, engine_em, engine_hook, engine_pd]
     if has_pyodbc:
         engines.extend([engine_pyodbc, engine_pyodbc_fast])
     for e in engines:
@@ -443,6 +452,7 @@ const D=__SUMMARY_JSON__;
 // Colors by category
 const P={
   'insertmanyvalues':'#78716c',
+  'insertmanyvalues (qmark)':'#d6d3d1',
   'insertmanyvalues + sis':'#a8a29e',
   'executemany':'#57534e',
   'bulkcopy (direct)':'#a78bfa',
@@ -456,7 +466,7 @@ const P={
 
 // Method ordering
 const MO=[
-  'insertmanyvalues','insertmanyvalues + sis','executemany',
+  'insertmanyvalues','insertmanyvalues (qmark)','insertmanyvalues + sis','executemany',
   'bulkcopy (direct)','bulkcopy (hook)','bulkcopy (pandas)',
   'cursor.executemany (raw)','cursor.bulkcopy (raw)',
   'pyodbc insertmanyvalues','pyodbc fast_executemany'
